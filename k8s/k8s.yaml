@@ -1,0 +1,155 @@
+#=======================
+# Namespace Definition
+#=======================
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: dev
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: app-config
+  namespace: dev
+data:
+  APP_ENV: dev
+  LOG_LEVEL: debug
+  BACKEND_URL: http://demo-backend-service:5000
+
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: app-secrets
+  namespace: dev
+type: Opaque
+data:
+  DB_PASSWORD: cGFzc3dvcmQ=  # base64 encoded 'password'
+---
+# =======================
+# Backend Deployment
+# =======================
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: demo-backend
+  namespace: dev
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: demo-backend
+  template:
+    metadata:
+      labels:
+        app: demo-backend
+    spec:
+      containers:
+        - name: demo-backend
+          image: demo-backend:v1
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 5000
+
+            
+
+---
+# =======================
+# Backend Service
+# =======================
+apiVersion: v1
+kind: Service
+metadata:
+  name: demo-backend-service
+  namespace: dev
+spec:
+  selector:
+    app: demo-backend
+  ports:
+    - port: 5000
+      targetPort: 5000
+  type: ClusterIP
+
+---
+# =======================
+# Frontend Deployment
+# =======================
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: demo-frontend
+  namespace: dev
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: demo-frontend
+  template:
+    metadata:
+      labels:
+        app: demo-frontend
+    spec:
+      containers:
+        - name: demo-frontend
+          image: demo-frontend:v1
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 80
+          env:
+            - name: BACKEND_URL
+              value: "http://demo-backend-service.default.svc.cluster.local:5000"
+          envFrom:
+            - configMapRef:
+                name: app-config
+            - secretRef:
+                name: app-secrets
+          env:
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: app-secrets
+                  key: DB_PASSWORD
+
+---
+# =======================
+# Frontend Service
+# =======================
+apiVersion: v1
+kind: Service
+metadata:
+  name: demo-frontend-service
+  namespace: dev
+spec:
+  selector:
+    app: demo-frontend
+  ports:
+    - port: 80
+      targetPort: 80
+  type: ClusterIP
+
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: demo-ingress
+  namespace: dev
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: demo.example.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: demo-frontend-service
+                port:
+                  number: 80
+          - path: /status
+            pathType: Prefix
+            backend:
+              service:
+                name: demo-backend-service
+                port:
+                  number: 5000
